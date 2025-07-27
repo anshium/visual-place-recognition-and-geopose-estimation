@@ -5,27 +5,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from PIL import Image, UnidentifiedImageError # Added UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError 
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from transformers import AutoImageProcessor, SwinModel
 from tqdm import tqdm
 import joblib
 import math
-import glob # To find image files in the test directory
+import glob 
 
-# --- !! IMPORTANT !! ---
-# Set this to the specific directory created during the training run you want to evaluate
-# Example: SAVE_DIR_TO_EVALUATE = "/home/skills/ansh/delme/swin_transformer/training_gemini_2_20231027_103000"
 SAVE_DIR_TO_EVALUATE = "/home/skills/ansh/delme/swin_transformer/training_gemini_2_20250505_004059"
 
-# --- !! ADD TEST DATA PATH !! ---
-# Set this to the directory containing your test images (without labels)
-# Example: TEST_IMG_DIR = "/home/skills/ansh/delme/dataset/iiit_dataset/images_test/images_test"
 TEST_IMG_DIR = "/home/skills/ansh/delme/dataset/iiit_dataset/images_test/images_test"
-# ---
 
-# --- Configuration (Derived from Training Script & SAVE_DIR) ---
 if not os.path.isdir(SAVE_DIR_TO_EVALUATE):
     raise FileNotFoundError(f"The specified save directory does not exist: {SAVE_DIR_TO_EVALUATE}\nPlease provide the correct path to a completed training run.")
 if not os.path.isdir(TEST_IMG_DIR):
@@ -35,26 +27,21 @@ else:
      PERFORM_TEST_PREDICTION = True
 
 
-# Paths (Validation data remains the same)
 VAL_CSV_PATH = "/home/skills/ansh/delme/cleaned_dataset_files/labels_val.csv"
 VAL_IMG_DIR = "/home/skills/ansh/delme/dataset/iiit_dataset/images_val/images_val"
 
-# Paths relative to the specific SAVE_DIR
 SCALER_PATH = os.path.join(SAVE_DIR_TO_EVALUATE, "latlon_scaler.pkl")
 BEST_MODEL_PATH = os.path.join(SAVE_DIR_TO_EVALUATE, 'model_best.pth')
 VAL_RESULTS_CSV_PATH = os.path.join(SAVE_DIR_TO_EVALUATE, 'validation_predictions.csv')
-TEST_RESULTS_CSV_PATH = os.path.join(SAVE_DIR_TO_EVALUATE, 'test_predictions_sorted.csv') # Added sorted to filename
+TEST_RESULTS_CSV_PATH = os.path.join(SAVE_DIR_TO_EVALUATE, 'test_predictions_sorted.csv')
 
-# Model & Processing Hyperparameters (Should match the training run)
 MODEL_NAME = "microsoft/swin-base-patch4-window12-384"
 IMAGE_SIZE = 384
 BATCH_SIZE = 32
 DROPOUT_PROB = 0.3
 
-# Image extensions to look for in the test directory
 IMAGE_EXTENSIONS = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.gif', "*.JPEG"]
 
-# --- Device Setup ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 print(f"Evaluating model from: {BEST_MODEL_PATH}")
@@ -62,10 +49,8 @@ print(f"Using scaler from: {SCALER_PATH}")
 print(f"Saving validation results to: {VAL_RESULTS_CSV_PATH}")
 if PERFORM_TEST_PREDICTION:
     print(f"Processing test images from: {TEST_IMG_DIR}")
-    print(f"Saving sorted test results to: {TEST_RESULTS_CSV_PATH}") # Updated message
+    print(f"Saving sorted test results to: {TEST_RESULTS_CSV_PATH}")
 
-# --- Load Scaler ---
-# (Scaler loading code remains the same)
 if not os.path.exists(SCALER_PATH):
     raise FileNotFoundError(f"Scaler file not found at: {SCALER_PATH}")
 try:
@@ -77,8 +62,6 @@ except Exception as e:
     print(f"Error loading scaler: {e}")
     exit()
 
-# --- Dataset Class for Validation (includes labels) ---
-# (CampusDataset class remains the same)
 class CampusDataset(Dataset):
     def __init__(self, dataframe, image_dir, processor, scaler, is_training=False, target_transforms=None):
         self.image_dir = image_dir
@@ -139,8 +122,6 @@ class CampusDataset(Dataset):
         target_original = torch.tensor(self.original_targets[idx], dtype=torch.float32)
         return inputs, target_scaled, target_original, filename
 
-# --- Dataset Class for Test (No labels) ---
-# (TestImageDataset class remains the same)
 class TestImageDataset(Dataset):
     def __init__(self, image_dir, processor):
         self.image_dir = image_dir
@@ -150,11 +131,7 @@ class TestImageDataset(Dataset):
         for ext in IMAGE_EXTENSIONS:
             self.image_paths.extend(glob.glob(os.path.join(self.image_dir, ext)))
 
-        # --- Sort image paths alphabetically by filename ---
-        # This ensures the dataset iterates in a predictable order if needed,
-        # although the final sorting happens on the DataFrame anyway.
         self.image_paths.sort(key=lambda p: os.path.basename(p))
-        # ---
 
         if not self.image_paths:
              raise FileNotFoundError(f"No image files ({', '.join(IMAGE_EXTENSIONS)}) found in {self.image_dir}")
@@ -184,8 +161,6 @@ class TestImageDataset(Dataset):
             return None
         return inputs, filename
 
-# --- Regression Model Class ---
-# (SwinRegressionModel class remains the same)
 class SwinRegressionModel(nn.Module):
     def __init__(self, model_name, dropout_prob=0.3):
         super().__init__()
@@ -201,8 +176,6 @@ class SwinRegressionModel(nn.Module):
         pooled_output = outputs.pooler_output
         return self.regressor(pooled_output)
 
-# --- Collate Function for Validation ---
-# (val_collate_fn remains the same)
 def val_collate_fn(batch):
     batch = [item for item in batch if item is not None]
     if not batch: return None
@@ -213,8 +186,6 @@ def val_collate_fn(batch):
     filenames = [item[3] for item in batch]
     return inputs, targets_scaled, targets_original, filenames
 
-# --- Collate Function for Test ---
-# (test_collate_fn remains the same)
 def test_collate_fn(batch):
     batch = [item for item in batch if item is not None]
     if not batch: return None
@@ -223,15 +194,10 @@ def test_collate_fn(batch):
     filenames = [item[1] for item in batch]
     return inputs, filenames
 
-# --- Main Prediction Script ---
-
-# Load validation dataframe
 val_df = pd.read_csv(VAL_CSV_PATH)
 
-# Initialize Image Processor
 image_processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
 
-# --- Create Validation Dataset & DataLoader ---
 val_dataset = CampusDataset(val_df, VAL_IMG_DIR, image_processor, scaler, is_training=False)
 
 val_loader = DataLoader(
@@ -239,13 +205,10 @@ val_loader = DataLoader(
 )
 
 
-# --- Create Test Dataset & DataLoader (if directory exists) ---
-test_loader = None # Initialize to None
+test_loader = None
 if PERFORM_TEST_PREDICTION:
     try:
         test_dataset = TestImageDataset(TEST_IMG_DIR, image_processor)
-        # Set shuffle=False for test loader to maintain order if needed,
-        # although we sort the final DataFrame anyway.
         test_loader = DataLoader(
             test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True, collate_fn=test_collate_fn
         )
@@ -257,11 +220,11 @@ if PERFORM_TEST_PREDICTION:
         PERFORM_TEST_PREDICTION = False
 
 
-# --- Load Model Architecture ---
+
 model = SwinRegressionModel(MODEL_NAME, dropout_prob=DROPOUT_PROB).to(device)
 
-# --- Load Best Model Weights ---
-# (Model loading code remains the same)
+
+
 if not os.path.exists(BEST_MODEL_PATH):
     raise FileNotFoundError(f"Best model file not found at: {BEST_MODEL_PATH}")
 try:
@@ -271,13 +234,10 @@ except Exception as e:
     print(f"Error loading model weights: {e}")
     exit()
 
-# --- Set model to evaluation mode ---
+
 model.eval()
 
-# ============================================
-# --- 1. Validation Set Prediction & Eval ---
-# ============================================
-# (Validation prediction loop and saving code remains the same)
+
 print("\n--- Starting Prediction on Validation Set ---")
 all_val_preds_original_list = []
 all_val_targets_original_list = []
@@ -332,10 +292,10 @@ else:
     except Exception as e:
         print(f"Error saving validation results to CSV: {e}")
 
-# ========================================
-# --- 2. Test Set Prediction ---
-# ========================================
-if PERFORM_TEST_PREDICTION and test_loader: # Check if test_loader was created
+
+
+
+if PERFORM_TEST_PREDICTION and test_loader: 
     print("\n--- Starting Prediction on Test Set ---")
     all_test_preds_list = []
     all_test_filenames_list = []
@@ -357,7 +317,7 @@ if PERFORM_TEST_PREDICTION and test_loader: # Check if test_loader was created
                  all_test_preds_list.extend(preds_original.tolist())
                  all_test_filenames_list.extend(filenames_batch)
 
-    # --- Saving Test Results ---
+    
     if not all_test_preds_list:
         print("No test predictions were made. Check test data directory and image files.")
     else:
@@ -369,13 +329,13 @@ if PERFORM_TEST_PREDICTION and test_loader: # Check if test_loader was created
             'predicted_longitude': all_test_preds_np[:, 1]
         })
 
-        # <<< --- SORTING STEP --- >>>
+        
         print("Sorting test results by filename...")
         test_results_df.sort_values(by='filename', inplace=True)
-        # <<< --- END SORTING STEP --- >>>
+        
 
         try:
-            # Save the SORTED DataFrame
+            
             test_results_df.to_csv(TEST_RESULTS_CSV_PATH, index=False, float_format='%.6f')
             print(f"Successfully saved sorted test prediction results to: {TEST_RESULTS_CSV_PATH}")
         except Exception as e:

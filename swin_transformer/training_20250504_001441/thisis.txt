@@ -1,1 +1,0 @@
-Normal trainging batch size 16

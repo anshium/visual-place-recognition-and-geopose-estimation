@@ -38,11 +38,11 @@ class SwinRegressionModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.backbone = SwinModel.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
-        self.regressor = nn.Linear(self.backbone.config.hidden_size, 2)  # Latitude & Longitude
+        self.regressor = nn.Linear(self.backbone.config.hidden_size, 2)  
 
     def forward(self, pixel_values):
         outputs = self.backbone(pixel_values=pixel_values)
-        pooled_output = outputs.pooler_output  # (batch_size, hidden_dim)
+        pooled_output = outputs.pooler_output  
         return self.regressor(pooled_output)
 
 def calculate_validation_scores(checkpoint_path, val_csv_path, image_dir):
@@ -50,10 +50,10 @@ def calculate_validation_scores(checkpoint_path, val_csv_path, image_dir):
 
     image_processor = AutoImageProcessor.from_pretrained("microsoft/swin-tiny-patch4-window7-224", use_fast=True)
 
-    # Create a list of image filenames from the validation CSV
+    
     valid_filenames = val_df['filename'].tolist()
 
-    # Filter the validation CSV to only include rows where the image file exists
+    
     filtered_val_df = val_df[val_df['filename'].apply(lambda x: os.path.exists(os.path.join(image_dir, x)))]
 
     if len(val_df) != len(filtered_val_df):
@@ -78,7 +78,7 @@ def calculate_validation_scores(checkpoint_path, val_csv_path, image_dir):
             preds = model(pixel_values).cpu().numpy()
             targets = targets.cpu().numpy()
 
-            # Inverse transform the predictions and targets
+            
             preds_original = scaler.inverse_transform(preds)
             targets_original = targets
 
@@ -143,8 +143,8 @@ if __name__ == "__main__":
     calculate_validation_scores(checkpoint_file, validation_csv, validation_image_dir)
 
 
-## epoch 24, 27, 28, 29, 42 at training_20250503_233339 was good
+#
 
-## in training_20250504_001441: checkpoint 49
+#
 
-## do for more epochs also, it was becoming better
+#

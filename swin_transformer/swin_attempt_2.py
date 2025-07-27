@@ -14,53 +14,44 @@ from tqdm import tqdm
 import joblib
 from datetime import datetime
 from torchvision import transforms
-import math # For sqrt
+import math
 
-# --- Configuration ---
-# Paths
 TRAIN_CSV_PATH = "/home/skills/ansh/delme/cleaned_dataset_files/labels_train.csv"
 VAL_CSV_PATH = "/home/skills/ansh/delme/cleaned_dataset_files/labels_val.csv"
 TRAIN_IMG_DIR = "/home/skills/ansh/delme/dataset/iiit_dataset/images_train/images_train"
 VAL_IMG_DIR = "/home/skills/ansh/delme/dataset/iiit_dataset/images_val/images_val"
 
-# *** Create a unique save directory for each run ***
 DATE_TIME = datetime.now().strftime('%Y%m%d_%H%M%S')
 SAVE_DIR = f"/home/skills/ansh/delme/swin_transformer/training_gemini_2_{DATE_TIME}"
 print(f"Results will be saved in: {SAVE_DIR}")
 
-# Define paths relative to the unique SAVE_DIR
 SCALER_PATH = os.path.join(SAVE_DIR, "latlon_scaler.pkl")
 BEST_MODEL_PATH = os.path.join(SAVE_DIR, 'model_best.pth')
 FINAL_MODEL_PATH = os.path.join(SAVE_DIR, 'model_final.pth')
 
-# Model & Training Hyperparameters
 MODEL_NAME = "microsoft/swin-base-patch4-window12-384"
-IMAGE_SIZE = 384 # Match model
-BATCH_SIZE = 16 # Adjust based on GPU memory
-LEARNING_RATE = 5e-5 # Significantly lower LR for fine-tuning
+IMAGE_SIZE = 384
+BATCH_SIZE = 16
+LEARNING_RATE = 5e-5
 WEIGHT_DECAY = 0.01
-NUM_EPOCHS = 150 # Total epochs for this run
-HUBER_DELTA = 1.0 # Delta for HuberLoss
-DROPOUT_PROB = 0.3 # Dropout for regressor head
-SCHEDULER_PATIENCE = 5 # Epochs to wait for improvement before reducing LR
-SCHEDULER_FACTOR = 0.2 # Factor to reduce LR by
-EARLY_STOPPING_PATIENCE = 40 # Epochs to wait after last improvement before stopping
+NUM_EPOCHS = 150
+HUBER_DELTA = 1.0
+DROPOUT_PROB = 0.3
+SCHEDULER_PATIENCE = 5
+SCHEDULER_FACTOR = 0.2
+EARLY_STOPPING_PATIENCE = 40
 
-# --- Ensure Save Directory Exists ---
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-# --- Device Setup ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# --- Data Augmentation ---
 train_transforms = transforms.Compose([
     transforms.RandomHorizontalFlip(p=0.5),
     transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
     transforms.RandomRotation(degrees=15),
 ])
 
-# --- Dataset Class ---
 class CampusDataset(Dataset):
     def __init__(self, dataframe, image_dir, processor, scaler, is_training=False, target_transforms=None):
         self.image_dir = image_dir
@@ -86,15 +77,13 @@ class CampusDataset(Dataset):
             raise ValueError("No valid image files found for the provided dataframe and image directory.")
 
         self.df = pd.DataFrame(valid_rows).reset_index(drop=True)
-        self.filenames = [row['filename'] for row in valid_rows] # Use filenames from valid_rows
+        self.filenames = [row['filename'] for row in valid_rows]
 
-        # Scale the targets using the provided scaler instance
         print("Scaling targets...")
-        # Ensure targets_to_scale is not empty before scaling
         if targets_to_scale:
              self.scaled_targets = self.scaler.transform(np.array(targets_to_scale))
         else:
-             self.scaled_targets = np.array([]) # Handle empty case
+             self.scaled_targets = np.array([]) 
 
         print("Dataset initialized.")
 
@@ -103,7 +92,7 @@ class CampusDataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        filename = self.filenames[idx] # Use stored filenames
+        filename = self.filenames[idx]
         image_path = os.path.join(self.image_dir, filename)
 
         try:
@@ -122,7 +111,6 @@ class CampusDataset(Dataset):
 
         return inputs, target
 
-# --- Regression Model using Swin Transformer ---
 class SwinRegressionModel(nn.Module):
     def __init__(self, model_name, dropout_prob=0.3):
         super().__init__()
@@ -139,48 +127,45 @@ class SwinRegressionModel(nn.Module):
         pooled_output = outputs.pooler_output
         return self.regressor(pooled_output)
 
-# --- Main Script ---
-
-# Load dataframes
 train_df = pd.read_csv(TRAIN_CSV_PATH)
 val_df = pd.read_csv(VAL_CSV_PATH)
 
-# --- Initialize Scaler (Always fit new one) ---
+
 print("Fitting new scaler on training data.")
 scaler = StandardScaler()
-# Fit ONLY on training data columns
+
 scaler.fit(train_df[['latitude', 'longitude']])
-# Save the newly fitted scaler
+
 joblib.dump(scaler, SCALER_PATH)
 print(f"Scaler saved to {SCALER_PATH}")
 
 
-# Initialize Image Processor
+
 image_processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
 
-# Create Datasets
-# Pass the *newly fitted* scaler to both datasets
+
+
 train_dataset = CampusDataset(train_df, TRAIN_IMG_DIR, image_processor, scaler, is_training=True, target_transforms=train_transforms)
 val_dataset = CampusDataset(val_df, VAL_IMG_DIR, image_processor, scaler, is_training=False)
 
-# Create DataLoaders
+
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
 
-# Model Setup
+
 model = SwinRegressionModel(MODEL_NAME, dropout_prob=DROPOUT_PROB).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 loss_fn = nn.HuberLoss(delta=HUBER_DELTA).to(device)
 scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=SCHEDULER_FACTOR, patience=SCHEDULER_PATIENCE, verbose=True)
 
-# --- Initialize Training State ---
+
 start_epoch = 0
 best_val_mse = float('inf')
 epochs_without_improvement = 0
 print("Starting training from scratch.")
 
-# --- Training Loop ---
-for epoch in range(start_epoch, NUM_EPOCHS): # Loop starts from 0
+
+for epoch in range(start_epoch, NUM_EPOCHS): 
     print(f"\n--- Epoch {epoch+1}/{NUM_EPOCHS} ---")
     model.train()
     total_train_loss = 0.0
@@ -188,7 +173,7 @@ for epoch in range(start_epoch, NUM_EPOCHS): # Loop starts from 0
 
     for batch_idx, (inputs, targets) in enumerate(train_loop):
         pixel_values = inputs["pixel_values"].to(device)
-        targets = targets.to(device) # Targets are already scaled
+        targets = targets.to(device) 
 
         preds_scaled = model(pixel_values)
         loss = loss_fn(preds_scaled, targets)
@@ -204,7 +189,7 @@ for epoch in range(start_epoch, NUM_EPOCHS): # Loop starts from 0
     avg_train_loss = total_train_loss / len(train_loader)
     print(f"Epoch {epoch+1} - Average Train Loss (Scaled): {avg_train_loss:.4f}")
 
-    # --- Validation ---
+    
     model.eval()
     all_preds_original = []
     all_targets_original = []
@@ -248,8 +233,8 @@ for epoch in range(start_epoch, NUM_EPOCHS): # Loop starts from 0
          print(f"  Pred: [{pred[0]:.4f}, {pred[1]:.4f}], True: [{true[0]:.4f}, {true[1]:.4f}], Abs Error: [{error[0]:.4f}, {error[1]:.4f}]")
     print("-" * 20)
 
-    # --- Checkpoint Saving & Early Stopping ---
-    # Save checkpoint of the current epoch
+    
+    
     checkpoint_path = os.path.join(SAVE_DIR, f'checkpoint_{epoch}.pth')
     torch.save({
         'epoch': epoch,
@@ -258,16 +243,16 @@ for epoch in range(start_epoch, NUM_EPOCHS): # Loop starts from 0
         'scheduler_state_dict': scheduler.state_dict(),
         'train_loss': avg_train_loss,
         'val_mse': val_mse,
-        'best_val_mse': best_val_mse, # Still save the current best for reference
+        'best_val_mse': best_val_mse, 
     }, checkpoint_path)
-    # print(f"Checkpoint saved to {checkpoint_path}") # Optional: uncomment if needed
+    
 
     scheduler.step(val_mse)
 
     if val_mse < best_val_mse:
         print(f"Validation MSE improved from {best_val_mse:.4f} to {val_mse:.4f}. Saving best model...")
         best_val_mse = val_mse
-        torch.save(model.state_dict(), BEST_MODEL_PATH) # Save to best model path
+        torch.save(model.state_dict(), BEST_MODEL_PATH) 
         epochs_without_improvement = 0
     else:
         epochs_without_improvement += 1
@@ -277,7 +262,7 @@ for epoch in range(start_epoch, NUM_EPOCHS): # Loop starts from 0
         print(f"Early stopping triggered after {EARLY_STOPPING_PATIENCE} epochs without improvement.")
         break
 
-# --- Final Model Save (Last epoch state) ---
+
 torch.save(model.state_dict(), FINAL_MODEL_PATH)
 print(f"Final model state dict saved to {FINAL_MODEL_PATH}")
 print(f"Best model state dict saved to {BEST_MODEL_PATH} with Val MSE: {best_val_mse:.4f}")

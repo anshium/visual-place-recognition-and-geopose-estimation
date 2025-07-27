@@ -13,39 +13,29 @@ from tqdm import tqdm
 import joblib
 import math # For sqrt
 
-# --- !! IMPORTANT !! ---
-# Set this to the specific directory created during the training run you want to evaluate
-# Example: SAVE_DIR_TO_EVALUATE = "/home/skills/ansh/delme/swin_transformer/training_gemini_2_20231027_103000"
-SAVE_DIR_TO_EVALUATE = "/home/skills/ansh/delme/swin_transformer/training_gemini_2_20250505_004059" # <--- CHANGE THIS
-# ---
+SAVE_DIR_TO_EVALUATE = "/home/skills/ansh/delme/swin_transformer/training_gemini_2_20250505_004059"
 
-# --- Configuration (Derived from Training Script & SAVE_DIR) ---
 if not os.path.isdir(SAVE_DIR_TO_EVALUATE):
     raise FileNotFoundError(f"The specified save directory does not exist: {SAVE_DIR_TO_EVALUATE}\nPlease provide the correct path to a completed training run.")
 
-# Paths (Validation data remains the same)
 VAL_CSV_PATH = "/home/skills/ansh/delme/cleaned_dataset_files/labels_val.csv"
 VAL_IMG_DIR = "/home/skills/ansh/delme/dataset/iiit_dataset/images_val/images_val"
 
-# Paths relative to the specific SAVE_DIR
 SCALER_PATH = os.path.join(SAVE_DIR_TO_EVALUATE, "latlon_scaler.pkl")
 BEST_MODEL_PATH = os.path.join(SAVE_DIR_TO_EVALUATE, 'model_best.pth')
-RESULTS_CSV_PATH = os.path.join(SAVE_DIR_TO_EVALUATE, 'validation_predictions.csv') # Path for saving results
+RESULTS_CSV_PATH = os.path.join(SAVE_DIR_TO_EVALUATE, 'validation_predictions.csv')
 
-# Model & Processing Hyperparameters (Should match the training run)
 MODEL_NAME = "microsoft/swin-base-patch4-window12-384"
 IMAGE_SIZE = 384
-BATCH_SIZE = 32 # Can potentially increase for inference if GPU memory allows
-DROPOUT_PROB = 0.3 # Needed for model definition, but dropout is inactive in eval mode
+BATCH_SIZE = 32
+DROPOUT_PROB = 0.3
 
-# --- Device Setup ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 print(f"Evaluating model from: {BEST_MODEL_PATH}")
 print(f"Using scaler from: {SCALER_PATH}")
 print(f"Saving results to: {RESULTS_CSV_PATH}")
 
-# --- Load Scaler ---
 if not os.path.exists(SCALER_PATH):
     raise FileNotFoundError(f"Scaler file not found at: {SCALER_PATH}")
 try:
@@ -57,7 +47,6 @@ except Exception as e:
     print(f"Error loading scaler: {e}")
     exit()
 
-# --- Dataset Class (Modified to return filename) ---
 class CampusDataset(Dataset):
     def __init__(self, dataframe, image_dir, processor, scaler, is_training=False, target_transforms=None):
         self.image_dir = image_dir
@@ -111,13 +100,11 @@ class CampusDataset(Dataset):
         inputs = {k: v.squeeze(0) for k, v in inputs.items()}
 
         target_scaled = torch.tensor(self.scaled_targets[idx], dtype=torch.float32)
-        target_original = torch.tensor(self.original_targets[idx], dtype=torch.float32) # Keep original target as well
+        target_original = torch.tensor(self.original_targets[idx], dtype=torch.float32)
 
-        # Return filename along with inputs and targets
         return inputs, target_scaled, target_original, filename
 
 
-# --- Regression Model Class (Copied from training script) ---
 class SwinRegressionModel(nn.Module):
     def __init__(self, model_name, dropout_prob=0.3):
         super().__init__()
@@ -134,7 +121,6 @@ class SwinRegressionModel(nn.Module):
         pooled_output = outputs.pooler_output
         return self.regressor(pooled_output)
 
-# --- Collate Function (to handle the extra filename) ---
 def collate_fn(batch):
     pixel_values = torch.stack([item[0]['pixel_values'] for item in batch])
     inputs = {'pixel_values': pixel_values}
@@ -144,31 +130,23 @@ def collate_fn(batch):
     return inputs, targets_scaled, targets_original, filenames
 
 
-# --- Main Prediction Script ---
-
-# Load validation dataframe
 val_df = pd.read_csv(VAL_CSV_PATH)
 
-# Initialize Image Processor
 image_processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
 
-# Create Validation Dataset using loaded scaler
 val_dataset = CampusDataset(val_df, VAL_IMG_DIR, image_processor, scaler, is_training=False)
 
-# Create Validation DataLoader using the custom collate_fn
 val_loader = DataLoader(
     val_dataset,
     batch_size=BATCH_SIZE,
     shuffle=False,
     num_workers=4,
     pin_memory=True,
-    collate_fn=collate_fn # Use the custom collate function
+    collate_fn=collate_fn
 )
 
-# Load Model Architecture
 model = SwinRegressionModel(MODEL_NAME, dropout_prob=DROPOUT_PROB).to(device)
 
-# Load Best Model Weights
 if not os.path.exists(BEST_MODEL_PATH):
     raise FileNotFoundError(f"Best model file not found at: {BEST_MODEL_PATH}")
 try:
@@ -178,10 +156,8 @@ except Exception as e:
     print(f"Error loading model weights: {e}")
     exit()
 
-# Set model to evaluation mode
 model.eval()
 
-# --- Prediction Loop ---
 all_preds_original_list = []
 all_targets_original_list = []
 all_filenames_list = []
@@ -189,38 +165,29 @@ all_filenames_list = []
 print("Starting prediction on validation set...")
 val_loop = tqdm(val_loader, desc="Predicting")
 
-with torch.no_grad(): # Disable gradient calculations
-    # Note: The dataloader now yields filenames as the 4th item
+with torch.no_grad():
     for batch_idx, (inputs, targets_scaled, targets_original_batch, filenames_batch) in enumerate(val_loop):
         pixel_values = inputs["pixel_values"].to(device)
-        # targets_scaled are already scaled, on CPU from collate_fn
-        # targets_original_batch are original coords, on CPU from collate_fn
-        # filenames_batch is a list of strings
 
-        preds_scaled = model(pixel_values) # Get model predictions (scaled)
+        preds_scaled = model(pixel_values)
 
-        # Move predictions to CPU, convert to numpy
         preds_np_scaled = preds_scaled.cpu().numpy()
-        targets_np_original = targets_original_batch.cpu().numpy() # Use the original targets directly
+        targets_np_original = targets_original_batch.cpu().numpy()
 
-        # Inverse transform predictions to original scale
-        if len(preds_np_scaled) > 0: # Ensure batch wasn't empty
+        if len(preds_np_scaled) > 0:
              preds_original = scaler.inverse_transform(preds_np_scaled)
 
-             all_preds_original_list.extend(preds_original.tolist()) # Store as list of lists
-             all_targets_original_list.extend(targets_np_original.tolist()) # Store as list of lists
-             all_filenames_list.extend(filenames_batch) # Store filenames
+             all_preds_original_list.extend(preds_original.tolist())
+             all_targets_original_list.extend(targets_np_original.tolist())
+             all_filenames_list.extend(filenames_batch)
 
 
-# --- Post-processing and Saving ---
 if not all_preds_original_list:
     print("No predictions were made. Check the validation data and paths.")
 else:
-    # Convert lists to numpy arrays for metric calculation
     all_preds_original_np = np.array(all_preds_original_list)
     all_targets_original_np = np.array(all_targets_original_list)
 
-    # --- Calculate Metrics ---
     val_mse = mean_squared_error(all_targets_original_np, all_preds_original_np)
     val_rmse = math.sqrt(val_mse)
     val_mae = mean_absolute_error(all_targets_original_np, all_preds_original_np)
@@ -235,7 +202,6 @@ else:
     print(f"  MAE Longitude: {val_mae_lon:.6f}")
     print("-" * 30)
 
-    # --- Create Results DataFrame ---
     results_df = pd.DataFrame({
         'filename': all_filenames_list,
         'true_latitude': all_targets_original_np[:, 0],
@@ -244,18 +210,15 @@ else:
         'predicted_longitude': all_preds_original_np[:, 1]
     })
 
-    # Add error columns for convenience
     results_df['error_latitude'] = np.abs(results_df['true_latitude'] - results_df['predicted_latitude'])
     results_df['error_longitude'] = np.abs(results_df['true_longitude'] - results_df['predicted_longitude'])
 
-    # --- Save Results to CSV ---
     try:
         results_df.to_csv(RESULTS_CSV_PATH, index=False, float_format='%.6f')
         print(f"Successfully saved prediction results to: {RESULTS_CSV_PATH}")
     except Exception as e:
         print(f"Error saving results to CSV: {e}")
 
-    # Optional: Print some sample predictions from the DataFrame
     print("\nSample Predictions vs True Values (Original Scale):")
     print(results_df[['filename', 'predicted_latitude', 'predicted_longitude', 'true_latitude', 'true_longitude']].head(10).to_string())
 

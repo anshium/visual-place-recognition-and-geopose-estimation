@@ -22,7 +22,6 @@ class CampusDataset(Dataset):
         self.processor = processor
         self.transform = transform
 
-        # Filter out rows where the image file does not exist
         valid_rows = []
         for _, row in dataframe.iterrows():
             image_path = os.path.join(self.image_dir, row['filename'])
@@ -52,7 +51,7 @@ class SwinRegressionModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.backbone = SwinModel.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
-        self.regressor = nn.Linear(self.backbone.config.hidden_size, 2)  # Latitude & Longitude
+        self.regressor = nn.Linear(self.backbone.config.hidden_size, 2)
 
     def forward(self, pixel_values):
         outputs = self.backbone(pixel_values=pixel_values)
@@ -81,7 +80,6 @@ loss_fn = nn.MSELoss()
 from sklearn.preprocessing import StandardScaler
 
 
-# dirs and stuff
 from datetime import datetime
 
 date_time = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -93,7 +91,6 @@ os.mkdir(save_dir)
 import joblib
 joblib.dump(scaler, f"latlon_scaler_{date_time}.pkl")
 
-# Training loop
 for epoch in range(50):
     model.train()
     total_loss = 0
@@ -119,7 +116,6 @@ for epoch in range(50):
     }, f'{save_dir}/checkpoint_{epoch}_.pth')
 
 
-    # Validation
     model.eval()
     val_loss = 0
 
@@ -139,7 +135,6 @@ for epoch in range(50):
             all_targets.append(targets_original)
 
 
-    # Combine for final reporting
     all_preds = np.vstack(all_preds)
     all_targets = np.vstack(all_targets)
 
@@ -147,8 +142,6 @@ for epoch in range(50):
         print(f"Pred: {pred}, True: {true}, Error: {np.abs(pred - true)}")
 
     print(f"Epoch {epoch+1} - Val Loss: {val_loss / len(val_loader):.4f}")
-
-
 
 
 torch.save(model, "/home/skills/ansh/delme/swin_transformer/finetuned_models/model_1.pth")
